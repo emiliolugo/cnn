@@ -1,0 +1,23 @@
+# Build directory
+build/
+
+# CMake generated files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# Ninja
+.ninja_deps
+.ninja_log
+
+# Compiled binaries
+*.o
+*.out
+*.exe
+*.a
+*.so
+*.dylib
+
+# macOS junk
+.DS_Store
