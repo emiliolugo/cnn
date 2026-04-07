@@ -1,56 +1,77 @@
 #pragma once
+#include <array>
 #include <stdexcept>
 #include <vector>
 
+struct Tensor;
+typedef Tensor (*backwards_func)(Tensor& self, Tensor& A, Tensor& B, float alpha);
 struct Tensor{
-    std::size_t rows_;
-    std::size_t cols_;
-    std::size_t depth_;
+    std::array<size_t,4> dims;
+
     std::vector<float> arr;
-
-    Tensor(std::size_t r, std::size_t c, std::size_t d)
-    : rows_(r), cols_(c), depth_(d), arr(r * c * d)
+    backwards_func backward;
+    
+    Tensor(std::array<size_t,4> dims_)
+    : dims(dims_), arr(dims[0] * dims[1] * dims[2] * dims[3])
     {}
 
-    Tensor(int r, int c, int d)
-    : rows_(r), cols_(c), depth_(d), arr(r * c * d)
+    Tensor(size_t d0, size_t d1, size_t d2, size_t d3)
+    : dims{d0, d1, d2, d3}, arr(d0 * d1 * d2 * d3)
     {}
 
-    float& at(std::size_t r, std::size_t c, std::size_t d) {
-        return arr[r * cols_ + c * (rows_ * depth_) + d];
+    Tensor(std::array<int,4> dims_)
+    : dims{(size_t)dims_[0], (size_t)dims_[1], (size_t)dims_[2], (size_t)dims_[3]},
+      arr(dims[0] * dims[1] * dims[2] * dims[3])
+    {}
+
+    float& at(size_t i0, size_t i1, size_t i2, size_t i3) {
+        return arr[i0*(dims[1]*dims[2]*dims[3])
+                  + i1*(dims[2]*dims[3])
+                  + i2*(dims[3])
+                  + i3];
     }
-
     const float& flat_at(std::size_t i) const {
         return arr[i];
     }
 
-    const float& at(std::size_t r, std::size_t c, std::size_t d) const {
-        return arr[r * cols_ + c * (rows_ * depth_) + d];
+    const float& at(size_t i0, size_t i1, size_t i2, size_t i3) const {
+        return arr[i0*(dims[1]*dims[2]*dims[3])
+                  + i1*(dims[2]*dims[3])
+                  + i2*(dims[3])
+                  + i3];
     }
 
-    const size_t& rows() const {
-        return rows_;
-    }
+    const std::array<size_t,4>& dms() const { return dims; }
 
-    const size_t& cols() const {
-        return cols_;
-    }
+    size_t batch()    const { return dims[0]; }
+    size_t channels() const { return dims[1]; }
+    size_t rows()     const { return dims[2]; }
+    size_t cols()     const { return dims[3]; }
 
-    const size_t& depth() const {
-        return depth_;
-    }
 
-    void set(std::size_t r, std::size_t c, std::size_t d, float f){
-        arr[r * cols_ + c * (rows_ * depth_) + d] = f;
+    void set(size_t i0, size_t i1, size_t i2, size_t i3, float f) {
+        arr[i0*(dims[1]*dims[2]*dims[3])
+                  + i1*(dims[2]*dims[3])
+                  + i2*(dims[3])
+                  + i3] = f;
     }
 
     bool operator ==(const Tensor& other){
-        if(rows_ != other.rows_ || cols_ != other.cols_ || depth_ != other.depth_) return false;
+        for(size_t i = 0; i < 4; ++i){
+            if(dims[i]!=other.dims[i]) return false;
+        }
 
-        for(size_t i = 0; i < rows_ * cols_ * depth_; ++i){
+        for(size_t i = 0; i < dims[0] * dims[1] * dims[2] * dims[3]; ++i){
             if(flat_at(i) != other.flat_at(i)) return false;
         }
         return true;
+    }
+
+    float& operator ()(size_t i0, size_t i1, size_t i2, size_t i3) {
+        return arr[i0*(dims[1]*dims[2]*dims[3])
+                  + i1*(dims[2]*dims[3])
+                  + i2*(dims[3])
+                  + i3];
     }
 
     Tensor convolve(const Tensor& input, const Tensor& kernel);
