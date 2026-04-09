@@ -4,32 +4,24 @@
 Tensor backward_input(const Tensor& A);
 Tensor backward_kernel(const Tensor& A);
 
-Tensor xcorr(const Tensor& input, Tensor& kernels, bool requires_grad = false){
+Tensor xcorr( Tensor& input, Tensor& kernels, bool requires_grad = false){
     
-    std::array<size_t,4> input_dims = input.dms();
-    size_t *num_images = &input_dims[0];
-    size_t *channels   = &input_dims[1];
-    size_t *irows      = &input_dims[2];
-    size_t *icols      = &input_dims[3];
-
-    std::array<size_t,4> kernels_dims = input.dms();
-    size_t *num_kernels = &kernels_dims[0];
-    size_t *num_filters   = &kernels_dims[1];
-    size_t *ksz      = &kernels_dims[2];
+    auto [num_images, channels, irows, icols] = input.dms();
+    auto [num_kernels, num_filters, ksz, _]   = kernels.dms();
 
     size_t retrows = irows -ksz -1;
     size_t retcols = icols -ksz -1;
 
-    Tensor ret = Tensor(*num_images, *num_filters, retrows, retcols);
+    Tensor ret = Tensor(num_images, num_filters, retrows, retcols);
 
-    for(size_t n = 0; n < *num_images; ++n){
+    for(size_t n = 0; n < num_images; ++n){
         for(size_t r = 0; r < retrows; ++r){
             for(size_t c = 0; c < retcols; ++c){
-                for(size_t d = 0; d < *num_kernels; ++d){
+                for(size_t d = 0; d < num_kernels; ++d){
                     float total = 0.0;
-                    for(size_t i = r; i < r + *ksz; ++i){
-                        for(size_t j = c; j < c + *ksz; ++j){
-                            for(size_t k = 0; k < *channels; ++k){
+                    for(size_t i = r; i < r + ksz; ++i){
+                        for(size_t j = c; j < c + ksz; ++j){
+                            for(size_t k = 0; k < channels; ++k){
                                 total += input.at(n, k, i, j) * kernels.at(d, k, i-r, j-c);
                             }
                         }
@@ -40,7 +32,10 @@ Tensor xcorr(const Tensor& input, Tensor& kernels, bool requires_grad = false){
         }
     }
     if(requires_grad){
-       ret.grad_fn = backward(ret,input,kernels); 
+        ret.ctx.input   = &input;
+        ret.ctx.kernels = &kernels;
+        ret.backward    = xcbackward;
+        ret.parents()   = {input, kernels};
     }
     
     return ret;
@@ -48,64 +43,91 @@ Tensor xcorr(const Tensor& input, Tensor& kernels, bool requires_grad = false){
 }
 
 
-Tensor convolve(const Tensor& input, const Tensor& kernels){
-    // kernels dims: [num_kernels, channels, ksz, ksz]
-    // input  dims: [batch, channels, rows, cols]
-    assert(kernels.rows() == kernels.cols() &&
-           kernels.rows() <= input.rows() && kernels.cols() <= input.cols());
+// true indicates full, 0 is valid
+Tensor convolve( Tensor& input, Tensor& kernels, bool is_full, bool requires_grad = false){
+    
+    auto [num_images, channels, irows, icols] = input.dms();
+    auto [num_kernels, num_filters, ksz, _]   = kernels.dms();
+    Tensor ret;
+    if(is_full){
+        size_t retrows = irows +ksz -1;
+        size_t retcols = icols +ksz -1;
 
-    size_t num_images  = input.batch();
-    size_t channels    = input.channels();
-    size_t irows       = input.rows();
-    size_t icols       = input.cols();
-    size_t num_kernels = kernels.batch();
-    size_t ksz         = kernels.rows();
-    size_t retrows     = (irows - ksz) + 1;
-    size_t retcols     = (icols - ksz) + 1;
+        ret = Tensor(num_images, num_filters, retrows, retcols);
 
-    Tensor ret = Tensor(num_images, num_kernels, retrows, retcols);
-
-    for(size_t n = 0; n < num_images; ++n){
-        for(size_t r = 0; r < retrows; ++r){
-            for(size_t c = 0; c < retcols; ++c){
-                for(size_t d = 0; d < num_kernels; ++d){
-                    float total = 0.0;
-                    for(size_t i = r; i < r + ksz; ++i){
-                        for(size_t j = c; j < c + ksz; ++j){
-                            for(size_t k = 0; k < channels; ++k){
-                                total += input.at(n, k, i, j)
-                                       * kernels.at(d, k, ksz-1-(i-r), ksz-1-(j-c));
+        for(size_t n = 0; n < num_images; ++n){
+            for(size_t r = 0; r < retrows; ++r){
+                for(size_t c = 0; c < retcols; ++c){
+                    for(size_t d = 0; d < num_kernels; ++d){
+                        float total = 0.0;
+                        for(size_t i = 0; i < ksz; ++i){
+                            for(size_t j = 0; j < ksz; ++j){
+                                int in_r = (int)r - (int)(ksz-1) + (int)i;
+                                int in_c = (int)c - (int)(ksz-1) + (int)j;
+                                if(in_r < 0 || in_r >= (int)irows) continue;
+                                if(in_c < 0 || in_c >= (int)icols) continue;
+                                for(size_t k = 0; k < channels; ++k){
+                                    total += input.at(n, k, in_r, in_c)
+                                           * kernels.at(d, k, ksz-1-i, ksz-1-j);
+                                }
                             }
                         }
+                        ret.set(n, d, r, c, total);
                     }
-                    ret.set(n, d, r, c, total);
+                }
+            }
+        }
+    } else {
+        size_t retrows = irows -ksz -1;
+        size_t retcols = icols -ksz -1;
+
+        ret = Tensor(num_images, num_filters, retrows, retcols);
+
+        for(size_t n = 0; n < num_images; ++n){
+            for(size_t r = 0; r < retrows; ++r){
+                for(size_t c = 0; c < retcols; ++c){
+                    for(size_t d = 0; d < num_kernels; ++d){
+                        float total = 0.0;
+                        for(size_t i = r; i < r + ksz; ++i){
+                            for(size_t j = c; j < c + ksz; ++j){
+                                for(size_t k = 0; k < channels; ++k){
+                                    total += input.at(n, k, i, j)
+                                        * kernels.at(d, k, ksz-1-(i-r), ksz-1-(j-c));
+                                }
+                            }
+                        }
+                        ret.set(n, d, r, c, total);
+                    }
                 }
             }
         }
     }
+
+
+    if(requires_grad){
+        ret.ctx.input   = &input;
+        ret.ctx.kernels = &kernels;
+        ret.backward    = xcbackward;
+        ret.parents()   = {input, kernels};
+    }
+    
     return ret;
+
 }
 
 
 
 // ONLY FOR SINGLE CHANNEL FILTER -> NEED TO GENERALIZE!!!!
-std::array<Tensor&,2> xcbackward(Tensor& self, Tensor& input, Tensor& kernels, Tensor& grad_output){
-     std::array<size_t,4> input_dims = input.dms();
-    size_t *num_images = &input_dims[0];
-    size_t *channels   = &input_dims[1];
-    size_t *irows      = &input_dims[2];
-    size_t *icols      = &input_dims[3];
+Tensor xcbackward(Tensor& self, BackwardCtx& ctx){
+    Tensor& input   = *ctx.input;
+    Tensor& kernels = *ctx.kernels;
+    //kernel grad
+    Tensor* grad = self.gd();
+    Tensor kernel_grad = xcorr(input, *grad);
+    //input grad
+    Tensor input_grad = convolve(*grad, kernels, true); // true indicates full conv
 
-    std::array<size_t,4> kernels_dims = kernels.dms();
-    size_t *num_kernels = &kernels_dims[0];
-    size_t *num_filters   = &kernels_dims[1];
-    size_t *ksz      = &kernels_dims[2];
-    //kernel returns
-
-    Tensor kernel_grad = xcorr(input, grad_output);
-    //tensor
-    Tensor input_grad = convolve(grad_output,kernels);
-
-    return {input_grad,kernel_grad};
-    
+    kernels.accumulate_grad(kernel_grad);
+    return input_grad;
 }
+
