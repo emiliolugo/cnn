@@ -35,7 +35,7 @@ Tensor xcorr( Tensor& input, Tensor& kernels, bool requires_grad = false){
         ret.ctx.input   = &input;
         ret.ctx.kernels = &kernels;
         ret.backward    = xcbackward;
-        ret.parents()   = {input, kernels};
+        ret.parents()   = {&input, &kernels};
     }
     
     return ret;
@@ -108,7 +108,7 @@ Tensor convolve( Tensor& input, Tensor& kernels, bool is_full, bool requires_gra
         ret.ctx.input   = &input;
         ret.ctx.kernels = &kernels;
         ret.backward    = xcbackward;
-        ret.parents()   = {input, kernels};
+        ret.parents()   = {&input, &kernels};
     }
     
     return ret;

@@ -17,7 +17,7 @@ struct Tensor{
     std::array<size_t,4> dims;
 
     std::vector<float> arr;
-    std::vector<Tensor> p;
+    std::vector<Tensor*> p;
     backwards_func backward = nullptr;
     BackwardCtx ctx;
     Tensor *grad = nullptr;
@@ -38,6 +38,20 @@ struct Tensor{
     Tensor()
     : dims{}, arr{}
     {}
+
+    Tensor(const Tensor& o)
+    : dims(o.dims), arr(o.arr), p(o.p), backward(o.backward), ctx(o.ctx),
+      requires_grad(o.requires_grad)
+    { grad = o.grad ? new Tensor(*o.grad) : nullptr; }
+
+    Tensor& operator=(const Tensor& o) {
+        if(this == &o) return *this;
+        delete grad;
+        dims = o.dims; arr = o.arr; p = o.p;
+        backward = o.backward; ctx = o.ctx; requires_grad = o.requires_grad;
+        grad = o.grad ? new Tensor(*o.grad) : nullptr;
+        return *this;
+    }
 
 
     ~Tensor() { delete grad; }
@@ -81,7 +95,7 @@ struct Tensor{
 
     Tensor* gd(){ return grad; }
 
-    std::vector<Tensor>& parents(){ return p; }
+    std::vector<Tensor*>& parents(){ return p; }
 
     bool operator ==(const Tensor& other){
         for(size_t i = 0; i < 4; ++i){
